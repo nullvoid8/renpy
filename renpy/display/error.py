@@ -162,7 +162,7 @@ def report_exception(short, full, traceback_fn):
         raise
 
 
-def report_parse_errors(errors, error_fn):
+def report_parse_errors(errors: list[str], error_fn: str) -> bool:
     """
     Reports an exception to the user. Returns True if the exception should
     be raised by the normal reporting mechanisms. Otherwise, should raise
@@ -174,7 +174,7 @@ def report_parse_errors(errors, error_fn):
 
     error_dump()
 
-    if renpy.game.args.command != "run": # @UndefinedVariable
+    if renpy.game.args.command != "run":  # @UndefinedVariable
         return True
 
     if "RENPY_SIMPLE_EXCEPTIONS" in os.environ:
@@ -199,7 +199,7 @@ def report_parse_errors(errors, error_fn):
             reload_action=reload_action,
             errors=errors,
             error_fn=error_fn,
-            )
+        )
 
     except renpy.game.CONTROL_EXCEPTIONS:
         raise
@@ -208,3 +208,5 @@ def report_parse_errors(errors, error_fn):
         renpy.display.log.write("While handling exception:")
         renpy.display.log.exception()
         raise
+
+    return False
