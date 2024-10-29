@@ -999,16 +999,15 @@ compile_filename = ""
 
 def py_compile(source, mode, filename='<none>', lineno=1, ast_node=False, cache=True, py=None):
     """
-    Compiles the given source code using the supplied codegenerator.
+    Compiles the given source code using the supplied code generator.
     Lists, List Comprehensions, and Dictionaries are wrapped when
     appropriate.
 
     `source`
-        The source code, as a either a string, pyexpr, or ast module
-        node.
+        The source code, as a either a string or PyExpr.
 
     `mode`
-        One of "exec" or "eval".
+        One of "exec", "hide" or "eval".
 
     `filename`
         The filename the source comes from. If a pyexpr is given, the
@@ -1028,9 +1027,6 @@ def py_compile(source, mode, filename='<none>', lineno=1, ast_node=False, cache=
 
     if ast_node:
         cache = False
-
-    if isinstance(source, ast.Module):
-        return compile(source, filename, mode)
 
     if isinstance(source, renpy.ast.PyExpr):
         filename = source.filename
