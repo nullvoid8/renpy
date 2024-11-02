@@ -26,7 +26,7 @@
 from __future__ import division, absolute_import, with_statement, print_function, unicode_literals
 from renpy.compat import PY2, basestring, bchr, bord, chr, open, pystr, range, round, str, tobytes, unicode # *
 
-from typing import Optional, Any
+from typing import Optional, Any, cast
 import contextlib
 
 # Import the python ast module, not ours.
@@ -876,35 +876,86 @@ py_compile_cache = { }
 old_py_compile_cache = { }
 
 
-def fix_locations(node, lineno, col_offset):
+def fix_locations(
+    node: ast.AST,
+    lineno_increment: int = 0,
+    col_offset: int = 0,
+    strip_ends: bool = False,
+    _parent_offset=(0, 0),
+    _first=True,
+):
     """
-    Assigns locations to the given node, and all of its children, adding
-    any missing line numbers and column offsets.
+    This function does `ast.increment_lineno`, `ast.fix_missing_locations`
+    and `[end_]col_offset` increments in one pass.
+
+    `lineno_increment`
+        Amount of lines to increment `lineno` by.
+
+    `col_offset`
+        0-indexed offset of source code. This should be used in case
+        source code have extra indent relative to compiled source.
+
+    `strip_ends`
+        If `True`, removes `end_lineno` and `end_col_offset`
+        so traceback does not render incorrect carets for given nodes tree.
     """
 
-    start = max(
-        (lineno, col_offset),
-        (getattr(node, "lineno", None) or 1, getattr(node, "col_offset", None) or 0)
-    )
+    if _first:
+        if not isinstance(node, (ast.Module, ast.Expression)):
+            raise ValueError(f"'fix_locations' called with unsupported top level node: {node}")
 
-    lineno, col_offset = start
+    # TypeIgnore is a special case where lineno is not an attribute
+    # but rather a field of the node itself.
+    if isinstance(node, ast.TypeIgnore):
+        node.lineno = getattr(node, 'lineno', 0) + lineno_increment
+        return
 
-    node.lineno = lineno
-    node.col_offset = col_offset
+    parent_lineno, parent_col_offset = _parent_offset
 
-    ends = [ start, (getattr(node, "end_lineno", None) or 1, getattr(node, "end_col_offset", None) or 0) ]
+    # lineno and col_offset must exist on every node.
+    # If there are none, we assume ast creator knows what they
+    # are doing and we can just assign to parent values.
+    if 'lineno' in node._attributes:
+        node = cast("ast.expr", node)
+        node.lineno = getattr(node, 'lineno', parent_lineno)
+        parent_lineno = node.lineno
+        node.lineno += lineno_increment
+
+    if 'col_offset' in node._attributes:
+        node = cast("ast.expr", node)
+        node.col_offset = getattr(node, 'col_offset', parent_col_offset)
+        parent_col_offset = node.col_offset
+        node.col_offset += col_offset
 
     for child in ast.iter_child_nodes(node):
-        fix_locations(child, lineno, col_offset)
-        ends.append((child.end_lineno, child.end_col_offset))
+        fix_locations(
+            child,
+            lineno_increment,
+            col_offset,
+            strip_ends,
+            (parent_lineno, parent_col_offset),
+            False)
 
-    end = max(ends)
+    # end_lineno and end_col_offset are optional, and we remove them if
+    # strip_ends is True (for generated code that doesn't have source).
+    if 'end_lineno' in node._attributes:
+        node = cast("ast.expr", node)
+        if strip_ends:
+            node.end_lineno = None
+        else:
+            end_lineno = getattr(node, 'end_lineno', None)
+            node.end_lineno = (end_lineno or parent_lineno) + lineno_increment
 
-    node.end_lineno = end[0]
-    node.end_col_offset = end[1]
+    if 'end_col_offset' in node._attributes:
+        node = cast("ast.expr", node)
+        if strip_ends:
+            node.end_col_offset = None
+        else:
+            end_col_offset = getattr(node, 'end_col_offset', None)
+            node.end_col_offset = (end_col_offset or parent_col_offset) + col_offset
 
 
-def quote_eval(s):
+def quote_eval(s: str):
     """
     Quotes a string for `eval`. This is necessary when it's in certain places,
     like as part of an argument string. We need to stick a single backslash
@@ -1113,8 +1164,7 @@ def py_compile(source, mode, filename='<none>', lineno=1, ast_node=False, cache=
         if mode == "hide":
             wrap_hide(tree)
 
-        fix_locations(tree, 1, 0)
-        ast.increment_lineno(tree, lineno - 1)
+        fix_locations(tree, line_offset, 0)
 
         line_offset = 0
 
@@ -1127,7 +1177,7 @@ def py_compile(source, mode, filename='<none>', lineno=1, ast_node=False, cache=
         except SyntaxError as orig_e:
             try:
                 tree = renpy.compat.fixes.fix_ast(tree)
-                fix_locations(tree, 1, 0)
+                fix_locations(tree)
                 with save_warnings():
                     rv = compile(tree, filename, py_mode, flags, 1)
             except Exception:
