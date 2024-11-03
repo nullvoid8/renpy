@@ -1048,7 +1048,7 @@ def quote_eval(s: str):
 compile_filename = ""
 
 
-def py_compile(source, mode, filename='<none>', lineno=1, ast_node=False, cache=True, py=None):
+def py_compile(source, mode, filename='<none>', lineno=1, col_offset=None, ast_node=False, cache=True, py=None):
     """
     Compiles the given source code using the supplied code generator.
     Lists, List Comprehensions, and Dictionaries are wrapped when
@@ -1066,7 +1066,12 @@ def py_compile(source, mode, filename='<none>', lineno=1, ast_node=False, cache=
 
     `lineno`
         The line number of the first line of source code. If a pyexpr is
-        given, the filename embedded in the pyexpr is used.
+        given, the lineno embedded in the pyexpr is used.
+
+    `col_offset`
+        If not None, the column offset of the first line of source code,
+        otherwise offset information is stripped from the source code.
+        If a pyexpr is given, the col_offset embedded in the pyexpr is used.
 
     `ast_node`
         Rather than returning compiled bytecode, returns the AST object
@@ -1125,8 +1130,10 @@ def py_compile(source, mode, filename='<none>', lineno=1, ast_node=False, cache=
     if mode == "eval":
         source = quote_eval(source)
 
-    line_offset = lineno - 1
     compile_filename = filename
+    line_offset = lineno - 1
+    code_offset = col_offset or 0
+    strip_ends = col_offset is None
 
     try:
 
@@ -1152,6 +1159,9 @@ def py_compile(source, mode, filename='<none>', lineno=1, ast_node=False, cache=
             # We don't use it, so whatever.
             orig_e.filename = filename
 
+            # Inserting artificial tokens can broke locations.
+            strip_ends = True
+
             try:
                 fixed_source = renpy.compat.fixes.fix_tokens(source)
                 with save_warnings():
@@ -1164,7 +1174,7 @@ def py_compile(source, mode, filename='<none>', lineno=1, ast_node=False, cache=
         if mode == "hide":
             wrap_hide(tree)
 
-        fix_locations(tree, line_offset, 0)
+        fix_locations(tree, line_offset, code_offset, strip_ends)
 
         line_offset = 0
 
@@ -1177,7 +1187,8 @@ def py_compile(source, mode, filename='<none>', lineno=1, ast_node=False, cache=
         except SyntaxError as orig_e:
             try:
                 tree = renpy.compat.fixes.fix_ast(tree)
-                fix_locations(tree)
+                # Creating artificial nodes can broke locations.
+                fix_locations(tree, strip_ends=True)
                 with save_warnings():
                     rv = compile(tree, filename, py_mode, flags, 1)
             except Exception:
